@@ -1,0 +1,28 @@
+paths: $ROS_PACKAGE_PATH(kmr_dream_portfolio)/src/
+portfolio:
+- package: kmr_dream_portfolio.kth
+  module: hfts_grasping
+  class: BiRRTMotionPlanner
+  types: ArmPlanner
+  parameters: {service_name: /hfts_integrated_planner_node/plan_arm_motion, add_object_service_name: /hfts_integrated_planner_node/add_object, remove_object_service_name: /hfts_integrated_planner_node/remove_object}
+- package: kmr_dream_portfolio.kth
+  module: hfts_grasping
+  class: HFTSGraspPlanner
+  types: GraspPlanner
+  parameters: {service_name: /hfts_planner/plan_fingertip_grasp}
+- package: kmr_dream_portfolio.kth
+  module: hfts_grasping
+  class: IntegratedHFTSPlanner
+  types: GraspPlanner;GraspController;ArmPlanner;ArmController
+  parameters: {arm_trajectory_action_name: /kmr/lbr_joint_trajectory_controller/follow_joint_trajectory, robotiq_hand_command_topic: /robotiq_hand/command, robotiq_hand_state_topic: /robotiq_hand/joint_states, arm_joint_names: [lbrAxis1, lbrAxis2, lbrAxis3, lbrAxis4, lbrAxis5, lbrAxis6, lbrAxis7], hand_joint_names: [scissor_joint, finger_2_joint_1], integrated_hfts_service_name: /hfts_integrated_planner_node/plan_fingertip_grasp_motion, arm_service_name: /hfts_integrated_planner_node/plan_arm_motion, add_object_service_name: /hfts_integrated_planner_node/add_object, remove_object_service_name: /hfts_integrated_planner_node/remove_object}
+- package: kmr_dream_portfolio.kth
+  module: simple_controller
+  class: SimpleArmController
+  types: ArmController
+  parameters: {command_topic: /kmr/lbr_joint_trajectory_controller/command}
+- package: kmr_dream_portfolio.kth
+  module: simple_controller
+  class: SimpleGraspController
+  types: GraspController
+  parameters: {robotiq_hand_command_topic: /robotiq_hand/command, robotiq_hand_state_topic: /robotiq_hand/joint_state}
+

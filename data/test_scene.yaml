@@ -1,0 +1,10 @@
+robot: !Robot
+    pose: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[0.0, 0.0, 0.0]', frame: world}
+    name: kmr_iiwa_robotiq
+    configuration: {lbrAxis1: 0.0, lbrAxis2: 0.0, lbrAxis3: 0.0, lbrAxis4: 0.0, lbrAxis5: 0.0, lbrAxis6: 0.0, lbrAxis7: 0.0, scissor_joint: 0.1, finger_2_joint_1: 0.051}
+objects:
+    -   !Object
+        name: crayola
+        object_class: crayola
+        pose: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[0.0, 0.80, 1.8]', frame: world}
+worldFrame: world

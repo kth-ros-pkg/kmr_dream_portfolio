@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find hfts_grasp_planner)/launch/start_integrated_hfts_planner.launch"/>
+    <include file="$(find hfts_grasp_planner)/launch/start_hfts_planner.launch"/>
+    <node name="joint_state_fixer" type="joint_state_fixer.py" pkg="kmr_dream_portfolio"/>
+</launch>

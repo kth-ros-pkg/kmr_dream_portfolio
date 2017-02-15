@@ -1,0 +1,14 @@
+!Task
+actions:
+- !MoveArmAction
+  constraints: {}
+  goal: !GraspReference {graspActionName: grasp1}
+  name: moveToGrasp
+- !GraspAction
+  constraints: {}
+  name: grasp1
+  objectName: crayola
+- !MoveArmAction
+  constraints: {}
+  goal: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[0.0, 0.0, 1.5]', frame: world}
+  name: liftAction

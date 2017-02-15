@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find kmr_dream_portfolio)/launch/start_portfolio.launch"/>
+    <include file="$(find kmr_gazebo)/launch/kmr_robotiq_world.launch"/>
+    <node name="kmr_simulator_interface" type="kmr_simulator_interface.py" pkg="kmr_dream_portfolio"/>
+</launch>
