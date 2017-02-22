@@ -25,15 +25,15 @@ class SimpleArmController(ArmController):
         return {}
 
     def getForbiddenConfigurations(self, role, paramPrefix):
-        return None
+        return []
 
     def initialize(self):
         self._traj_pub = rospy.Publisher(self._command_topic, JointTrajectory, queue_size=1)
 
-    def allocateResources(self, roles):
+    def allocateResources(self, roles=None):
         pass
 
-    def releaseResources(self, roles):
+    def releaseResources(self, roles=None):
         pass
 
     def destroy(self):
@@ -57,8 +57,10 @@ class SimpleArmController(ArmController):
 
 
 class SimpleGraspController(GraspController):
-    def __init__(self, robotiq_hand_command_topic, robotiq_hand_state_topic):
+    def __init__(self, robotiq_hand_command_topic, robotiq_hand_joints_topic,
+                 robotiq_hand_state_topic):
         self._robotiq_hand_command_topic = robotiq_hand_command_topic
+        self._robotiq_hand_joints_topic = robotiq_hand_joints_topic
         self._robotiq_hand_state_topic = robotiq_hand_state_topic
         self._robotiq_hand_interface = None
 
@@ -77,16 +79,17 @@ class SimpleGraspController(GraspController):
         return {}
 
     def getForbiddenConfigurations(self, role, paramPrefix):
-        return None
+        return []
 
     def initialize(self):
         self._robotiq_hand_interface = RobotiqHandInterface(self._robotiq_hand_command_topic,
-                                                            self._robotiq_hand_state_topic)
+                                                            self._robotiq_hand_state_topic,
+                                                            self._robotiq_hand_joints_topic)
 
-    def allocateResources(self, roles):
+    def allocateResources(self, roles=None):
         self._robotiq_hand_interface.activate()
 
-    def releaseResources(self, roles):
+    def releaseResources(self, roles=None):
         pass
 
     def destroy(self):
@@ -105,15 +108,16 @@ class SimpleGraspController(GraspController):
     def startGraspExecution(self, grasp, context, paramPrefix, parameters):
         input_to_hand = {}
         for (key, value) in grasp.hand_configuration.iteritems():
-            closing_offset = parameters[paramPrefix + 'closing_offset_' + key]
+            closing_offset = parameters[paramPrefix + '_closing_offset_' + key]
             input_to_hand[key] = value + closing_offset
 
         input_to_hand['delta_t'] = 0.0
         input_to_hand['reduced_dofs'] = True
-        self._robotiq_hand_interface.set_goal_configuration(*input_to_hand)
+        input_to_hand['block'] = True
+        self._robotiq_hand_interface.set_goal_configuration(input_to_hand)
         # TODO return value based on what simulator claims?
         return True
 
-    def stopGraspExecution(self, grasp, context, paramPrefix, parameters):
+    def stopGraspExecution(self):
         return True
 

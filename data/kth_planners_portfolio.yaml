@@ -6,12 +6,14 @@ portfolio:
   types: ArmPlanner
   parameters: {service_name: /hfts_integrated_planner_node/plan_arm_motion,
                add_object_service_name: /hfts_integrated_planner_node/add_object,
-               remove_object_service_name: /hfts_integrated_planner_node/remove_object}
+               remove_object_service_name: /hfts_integrated_planner_node/remove_object,
+               node_name: /hfts_integrated_planner_node}
 - package: kmr_dream_portfolio.kth
   module: hfts_grasping
   class: HFTSGraspPlanner
   types: GraspPlanner
-  parameters: {service_name: /hfts_planner/plan_fingertip_grasp}
+  parameters: {service_name: /hfts_planner/plan_fingertip_grasp,
+               node_name: /hfts_planner_node}
 - package: kmr_dream_portfolio.kth
   module: hfts_grasping
   class: IntegratedHFTSPlanner
@@ -25,17 +27,6 @@ portfolio:
                integrated_hfts_service_name: /hfts_integrated_planner_node/plan_fingertip_grasp_motion,
                arm_service_name: /hfts_integrated_planner_node/plan_arm_motion,
                add_object_service_name: /hfts_integrated_planner_node/add_object,
-               remove_object_service_name: /hfts_integrated_planner_node/remove_object}
-- package: kmr_dream_portfolio.kth
-  module: simple_controller
-  class: SimpleArmController
-  types: ArmController
-  parameters: {command_topic: /kmr/lbr_joint_trajectory_controller/command}
-- package: kmr_dream_portfolio.kth
-  module: simple_controller
-  class: SimpleGraspController
-  types: GraspController
-  parameters: {robotiq_hand_command_topic: /robotiq_hand/command,
-               robotiq_hand_state_topic: /robotiq_hand/state,
-               robotiq_hand_joints_topic: /robotiq_hand/joint_states}
-
+               remove_object_service_name: /hfts_integrated_planner_node/remove_object,
+               node_name: /hfts_integrated_planner_node,
+               use_dummy_control: True}

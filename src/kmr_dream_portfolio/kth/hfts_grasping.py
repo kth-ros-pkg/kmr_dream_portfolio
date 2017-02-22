@@ -2,8 +2,10 @@ from manipulation_dreambed.MethodTypes import ArmPlanner, ArmController, GraspPl
 from manipulation_dreambed.MethodTypes import GraspResult as ContextGraspResult
 from manipulation_dreambed.Context import Pose as ContextPose
 from manipulation_dreambed.Context import ConfigurationWrapper as ContextConfiguration
+import manipulation_dreambed.DummySimulator as DummySimulator
 from manipulation_dreambed import ROSUtils
 import actionlib
+import dynamic_reconfigure.client
 import rospy
 import numpy
 from control_msgs.msg import FollowJointTrajectoryAction, FollowJointTrajectoryActionFeedback, FollowJointTrajectoryActionGoal, FollowJointTrajectoryActionResult
@@ -14,6 +16,13 @@ from kmr_dream_portfolio.kth.utils.robotiq_interface import RobotiqHandInterface
 from hfts_grasp_planner.srv import PlanArmMotion, PlanArmMotionRequest, PlanGraspMotion, PlanGraspMotionRequest, PlanGrasp, PlanGraspRequest
 from hfts_grasp_planner.srv import AddObject, AddObjectRequest, RemoveObject, RemoveObjectRequest
 
+
+def send_parameters(parameter_description, param_prefix, parameters, client):
+    params_to_send = {}
+    for (name, description) in parameter_description.iteritems():
+        short_name = name.replace(param_prefix + '_', '')
+        params_to_send[short_name] = parameters[name]
+    client.update_configuration(params_to_send)
 
 
 class SceneBuilderInterface(object):
@@ -50,7 +59,8 @@ class SceneBuilderInterface(object):
             in our OpenRAVE world."""
         scene_info = context.getSceneInformation()
         self.cleanup_scene()
-        b_success = self.set_robot_pose(scene_info.getRobotInfo())
+        robot_info = scene_info.getRobotInfo()
+        b_success = self.set_robot_pose(robot_info)
         for object_name in scene_info.getObjectNames():
             tb_success = self.set_object_pose(scene_info.getObjectInfo(object_name))
             b_success = tb_success and b_success
@@ -59,12 +69,15 @@ class SceneBuilderInterface(object):
 
 
 class BiRRTMotionPlanner(ArmPlanner):
-    def __init__(self, service_name, add_object_service_name, remove_object_service_name):
+    def __init__(self, service_name, add_object_service_name, remove_object_service_name,
+                 node_name):
         self._arm_service_name = service_name
         self._add_object_service_name = add_object_service_name
         self._remove_object_service_name = remove_object_service_name
         self._plan_arm_motion_service = None
         self._scene_interface = None
+        self._node_name = node_name
+        self._parameter_client = None
 
     def getName(self):
         return "BiRRTMotionPlanner"
@@ -72,7 +85,7 @@ class BiRRTMotionPlanner(ArmPlanner):
     def getParameters(self, role, paramPrefix):
         if role is not 'ArmPlanner':
             raise ValueError('[BiRRTMotionPlanner::getParameters] Parameters for non implemented role requested: ' + str(role))
-        # TODO do we have parameters for this method?
+        # return {paramPrefix + '_velocity_factor': ('real', [0.001, 1.0], 0.2)}
         return {}
 
     def getConditionals(self, role, paramPrefix):
@@ -85,7 +98,7 @@ class BiRRTMotionPlanner(ArmPlanner):
         if role is not 'ArmPlanner':
             raise ValueError('[BiRRTMotionPlanner::getForbiddenConfigurations] Conditionals for non implemented role requested: ' + str(role))
         # TODO do we have parameters for this method?
-        return None
+        return []
 
     def initialize(self):
         rospy.loginfo('Waiting for service %s to come up' % self._arm_service_name)
@@ -93,6 +106,7 @@ class BiRRTMotionPlanner(ArmPlanner):
         self._plan_arm_motion_service = rospy.ServiceProxy(self._arm_service_name, PlanArmMotion)
         self._scene_interface = SceneBuilderInterface(self._add_object_service_name,
                                                       self._remove_object_service_name)
+        self._parameter_client = dynamic_reconfigure.client.Client(self._node_name)
 
     def allocateResources(self, roles=None):
         pass
@@ -114,6 +128,8 @@ class BiRRTMotionPlanner(ArmPlanner):
 
     def planArmTrajectory(self, goal, context, paramPrefix, parameters):
         # TODO are there any parameters we can set here?
+        send_parameters(self.getParameters('ArmPlanner', paramPrefix),
+                        paramPrefix, parameters, self._parameter_client)
         self._scene_interface.synchronize_scene(context)
         plan_arm_request = PlanArmMotionRequest()
         start_configuration = context.getRobotInformation().configuration
@@ -121,19 +137,20 @@ class BiRRTMotionPlanner(ArmPlanner):
             raise NotImplementedError('[BiRRTMotionPlanner::planArmTrajectory] Goals of type %s not supported.' % str(type(goal)))
         plan_arm_request.target_pose = ROSUtils.toROSPose(goal, bStamped=True)
         plan_arm_request.start_configuration = ROSUtils.toJointState(start_configuration)
+        plan_arm_request.grasped_object = context.getRobotInformation().grasped_object
         response = self._plan_arm_motion_service(plan_arm_request)
         if response.planning_success:
-            import IPython
-            IPython.embed()
             return ROSUtils.toContextTrajectory(response.trajectory)
         return None
 
 
 class HFTSGraspPlanner(GraspPlanner):
     #TODO wrap service call to openrave node that runs HFTS only
-    def __init__(self, service_name):
+    def __init__(self, service_name, node_name):
         self._grasp_planner_service = None
         self._service_name = service_name
+        self._node_name = node_name
+        self._parameter_client = None
 
     def getName(self):
         return "HFTSGraspPlanner"
@@ -141,8 +158,8 @@ class HFTSGraspPlanner(GraspPlanner):
     def getParameters(self, role, paramPrefix):
         if role is not 'GraspPlanner':
             raise ValueError('[HFTSGraspPlanner::getParameters] Parameters for non implemented role requested: ' + str(role))
-        # TODO do we have parameters for this method?
-        return {}
+        return {paramPrefix + '_num_planning_attempts': ('integer', [1, 200], 10),
+                paramPrefix + '_num_hfts_iterations': ('integer', [1, 200], 40)}
 
     def getConditionals(self, role, paramPrefix):
         if role is not 'GraspPlanner':
@@ -154,12 +171,13 @@ class HFTSGraspPlanner(GraspPlanner):
         if role is not 'GraspPlanner':
             raise ValueError('[HFTSGraspPlanner::getForbiddenConfigurations] Conditionals for non implemented role requested: ' + str(role))
         # TODO do we have parameters for this method?
-        return {}
+        return []
 
     def initialize(self):
         rospy.loginfo('Waiting for service %s to come up' % self._service_name)
         rospy.wait_for_service(self._service_name)
         self._grasp_planner_service = rospy.ServiceProxy(self._service_name, PlanGrasp)
+        self._parameter_client = dynamic_reconfigure.client.Client(self._node_name)
 
     def allocateResources(self, roles=None):
         pass
@@ -180,15 +198,17 @@ class HFTSGraspPlanner(GraspPlanner):
         raise NotImplementedError('[HFTSGraspPlanner::executeBatch] Batch processing not supported.')
 
     def planGrasp(self, object, context, paramPrefix, parameters):
+        send_parameters(self.getParameters('GraspPlanner', paramPrefix),
+                        paramPrefix, parameters, self._parameter_client)
         object_info = context.getSceneInformation().getObjectInfo(object)
         plan_grasp_request = PlanGraspRequest()
         plan_grasp_request.object_identifier = object_info.object_class
         response = self._grasp_planner_service(plan_grasp_request)
         if response.planning_success:
-            grasp_result = ContextGraspResult()
-            grasp_result.configuration = ROSUtils.toContextConfiguration(response.hand_configuration)
-            grasp_result.pose = ROSUtils.toContextPose(response.grasp_pose)
+            pose = ROSUtils.toContextPose(response.grasp_pose)
+            configuration = ROSUtils.toContextConfiguration(response.hand_configuration)
             # TODO approach direction?
+            grasp_result = ContextGraspResult(grasp_pose=pose, approach_vector=None, hand_configuration=configuration)
             return grasp_result
         return None
 
@@ -196,22 +216,31 @@ class HFTSGraspPlanner(GraspPlanner):
 class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmController):
     # TODO wrap service calls to openrave node to plan both ArmMotion and Grasps
     def __init__(self, arm_trajectory_action_name, robotiq_hand_command_topic,
-                 robotiq_hand_state_topic, arm_joint_names, hand_joint_names,
+                 robotiq_hand_state_topic, robotiq_hand_joints_topic,
+                 arm_joint_names, hand_joint_names,
                  integrated_hfts_service_name, arm_service_name,
-                 add_object_service_name, remove_object_service_name):
+                 add_object_service_name, remove_object_service_name,
+                 node_name, use_dummy_control=False):
         self._arm_trajectory_action_name = arm_trajectory_action_name
         self._robotiq_hand_command_topic_name = robotiq_hand_command_topic
         self._robotiq_hand_state_topic_name = robotiq_hand_state_topic
+        self._robotiq_hand_joints_topic_name = robotiq_hand_joints_topic
         self._arm_joint_names = arm_joint_names
         self._hand_joint_names = hand_joint_names
         self._integrated_hfts_service_name = integrated_hfts_service_name
         self._arm_service_name = arm_service_name
         self._add_object_service_name = add_object_service_name
         self._remove_object_service_name = remove_object_service_name
+        self._node_name = node_name
+        self._parameter_client = None
         self._synched_hand_arm_controller = None
         self._integrated_hfts_service = None
         self._plan_arm_motion_service = None
         self._scene_interface = None
+        if use_dummy_control:
+            self._dummy_controller = DummySimulator.getControllerInstance()
+        else:
+            self._dummy_controller = None
 
     def getName(self):
         return "IntegratedHFTSPlanner"
@@ -219,21 +248,31 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
     def getParameters(self, role, paramPrefix):
         if role not in ['ArmPlanner', 'GraspPlanner', 'GraspController', 'ArmController']:
             raise ValueError('[IntegratedHFTSPlanner::getParameters] Parameters for non implemented role requested: ' + str(role))
-        # TODO return parameters definition
+        if role == 'GraspPlanner':
+            return {paramPrefix + '_min_iterations': ('integer', [1, 200], 10),
+                    paramPrefix + '_max_iterations': ('integer', [1, 200], 10),
+                    paramPrefix + '_free_space_weight': ('real', [0.0, 10.0], 0.5),
+                    paramPrefix + '_connected_space_weight': ('real', [0.0, 10.0], 4.0),
+                    paramPrefix + '_max_num_hierarchy_descends': ('integer', [0, 20], 0),
+                    paramPrefix + '_time_limit': ('real', [0.0, 120.0], 60.0),
+                    paramPrefix + '_use_approximates': ('integer', [0, 1], 1)}
+        if role == 'ArmPlanner':
+            # return {paramPrefix + '_velocity_factor': ('real', [0.001, 1.0], 0.2)}
+            return {}
         # closing_offset_scissor_joint, closing_offset_finger_2_joint_1
         return {}
 
     def getConditionals(self, role, paramPrefix):
         if role not in ['ArmPlanner', 'GraspPlanner', 'GraspController', 'ArmController']:
             raise ValueError('[IntegratedHFTSPlanner::getConditionals] Conditionals for non implemented role requested: ' + str(role))
-        # TODO do we have parameters for this method?
         return {}
 
     def getForbiddenConfigurations(self, role, paramPrefix):
         if role not in ['ArmPlanner', 'GraspPlanner', 'GraspController', 'ArmController']:
             raise ValueError('[IntegratedHFTSPlanner::getForbiddenConfigurations] Conditionals for non implemented role requested: ' + str(role))
-        # TODO do we have parameters for this method?
-        return {}
+        if role == 'GraspPlanner':
+            return ['{%s_max_iterations < %s_min_iterations}' % (paramPrefix, paramPrefix)]
+        return []
 
     def initialize(self):
         rospy.loginfo('Waiting for service %s to come up' % self._integrated_hfts_service_name)
@@ -244,14 +283,17 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
         rospy.wait_for_service(self._add_object_service_name)
         rospy.loginfo('Waiting for service %s to come up' % self._remove_object_service_name)
         rospy.wait_for_service(self._remove_object_service_name)
-        self._synched_hand_arm_controller = SynchedHandArmController(self._arm_trajectory_action_name,
-                                                                     self._robotiq_hand_command_topic_name,
-                                                                     self._robotiq_hand_state_topic_name,
-                                                                     self._arm_joint_names,
-                                                                     self._hand_joint_names)
+        if self._dummy_controller is None:
+            self._synched_hand_arm_controller = SynchedHandArmController(self._arm_trajectory_action_name,
+                                                                         self._robotiq_hand_command_topic_name,
+                                                                         self._robotiq_hand_state_topic_name,
+                                                                         self._robotiq_hand_joints_topic_name,
+                                                                         self._arm_joint_names,
+                                                                         self._hand_joint_names)
         self._scene_interface = SceneBuilderInterface(self._add_object_service_name, self._remove_object_service_name)
         self._integrated_hfts_service = rospy.ServiceProxy(self._integrated_hfts_service_name, PlanGraspMotion)
         self._plan_arm_motion_service = rospy.ServiceProxy(self._arm_service_name, PlanArmMotion)
+        self._parameter_client = dynamic_reconfigure.client.Client(self._node_name)
 
     def allocateResources(self, roles=None):
         pass
@@ -277,12 +319,16 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
 
     def planGrasp(self, object, context, paramPrefix, parameters):
         # If this function is called, it means we are only asked to plan a grasp
+        send_parameters(self.getParameters('GraspPlanner', paramPrefix),
+                        paramPrefix, parameters, self._parameter_client)
         self._scene_interface.synchronize_scene(context)
         trajectory, pose = self._call_hfts_planner(object, context, paramPrefix, parameters)
         return self._make_grasp_result(trajectory, pose)
 
     def planArmTrajectory(self, goal, context, paramPrefix, parameters):
         # If this function is called, it means we are only asked to plan an arm motion
+        send_parameters(self.getParameters('ArmPlanner', paramPrefix),
+                        paramPrefix, parameters, self._parameter_client)
         self._scene_interface.synchronize_scene(context)
         plan_arm_request = PlanArmMotionRequest()
         start_configuration = context.getRobotInformation().configuration
@@ -290,6 +336,7 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
             raise NotImplementedError('[IntegratedHFTSPlanner::planArmTrajectory] Goals of type %s not supported.' % str(type(goal)))
         plan_arm_request.target_pose = ROSUtils.toROSPose(goal, bStamped=True)
         plan_arm_request.start_configuration = ROSUtils.toJointState(start_configuration)
+        plan_arm_request.grasped_object = context.getRobotInformation().grasped_object
         response = self._plan_arm_motion_service(plan_arm_request)
         if response.planning_success:
             return ROSUtils.toContextTrajectory(response.trajectory)
@@ -297,25 +344,37 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
 
     def executeArmTrajectory(self, trajectory, context, paramPrefix, parameters):
         # If this function is called, it means we are only asked to execute an arm motion
-        ros_traj = ROSUtils.toROSTrajectory(trajectory)
-        ros_traj.header.stamp = rospy.Time.now() + rospy.Duration.from_sec(0.01)
-        self._synched_hand_arm_controller.execute_arm_trajectory(ros_traj, block=True)
-        return True
+        send_parameters(self.getParameters('ArmController', paramPrefix),
+                        paramPrefix, parameters, self._parameter_client)
+        if self._dummy_controller is None:
+            ros_traj = ROSUtils.toROSTrajectory(trajectory)
+            ros_traj.header.stamp = rospy.Time.now() + rospy.Duration.from_sec(0.01)
+            self._synched_hand_arm_controller.execute_arm_trajectory(ros_traj, block=True)
+            return True
+        else:
+            return self._dummy_controller.executeArmTrajectory(trajectory, context, paramPrefix, parameters)
 
     def startGraspExecution(self, grasp, context, paramPrefix, parameters):
         """ Closes the hand to grasp an object. """
+        send_parameters(self.getParameters('GraspController', paramPrefix),
+                        paramPrefix, parameters, self._parameter_client)
+        if self._dummy_controller is not None:
+            return self._dummy_controller.startGraspExecution(grasp, context, paramPrefix, parameters)
         input_to_hand = {}
         for (key, value) in grasp.hand_configuration.iteritems():
-            closing_offset = parameters[paramPrefix + 'closing_offset_' + key]
+            closing_offset = parameters[paramPrefix + '_closing_offset_' + key]
             input_to_hand[key] = value + closing_offset
 
         input_to_hand['delta_t'] = 0.0
         input_to_hand['reduced_dofs'] = True
-        self._synched_hand_arm_controller.hand_interface.set_goal_configuration(*input_to_hand)
+        input_to_hand['block'] = True
+        self._synched_hand_arm_controller.hand_interface.set_goal_configuration(input_to_hand)
         # TODO return value based on what simulator claims?
         return True
 
-    def stopGraspExecution(self, grasp, context, paramPrefix, parameters):
+    def stopGraspExecution(self):
+        if self._dummy_controller is not None:
+            return self._dummy_controller.stopGraspExecution()
         return True
 
     def _call_hfts_planner(self, object_name, context, paramPrefix, parameters):
@@ -340,15 +399,19 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
         grasp_joint_values = [trajectory.points[-1].positions[i] for i in indices]
         grasp_joint_names = [trajectory.joint_names[i] for i in indices]
         # Create output
-        grasp_result = ContextGraspResult()
-        grasp_result.configuration = ContextConfiguration(dict(zip(grasp_joint_names, grasp_joint_values)))
-        grasp_result.pose = ROSUtils.toContextPose(pose)
+        configuration = dict(zip(grasp_joint_names, grasp_joint_values))
+        pose = ROSUtils.toContextPose(pose)
+        # TODO what about approach dir?
+        approach_dir = None
+        grasp_result = ContextGraspResult(grasp_pose=pose, approach_vector=approach_dir,
+                                          hand_configuration=configuration)
         return grasp_result
 
 
 class SynchedHandArmController(object):
     def __init__(self, arm_trajectory_action_name,
                  robotiq_hand_command_topic, robotiq_hand_state_topic,
+                 robotiq_hand_joints_topic,
                  arm_joint_names, hand_joint_names):
         """
             Creates a new SynchedHandArmController.
@@ -360,7 +423,9 @@ class SynchedHandArmController(object):
         tolerance = JointTolerance()
         self._path_tolerance = len(arm_joint_names) * [tolerance]
         self._goal_tolerance = len(arm_joint_names) * [tolerance]
-        self.hand_interface = RobotiqHandInterface(robotiq_hand_command_topic, robotiq_hand_state_topic)
+        self.hand_interface = RobotiqHandInterface(robotiq_hand_command_topic,
+                                                   robotiq_hand_state_topic,
+                                                   robotiq_hand_joints_topic)
         self._execution_running = False
         self._current_arm_traj = None
         self._current_hand_traj = None

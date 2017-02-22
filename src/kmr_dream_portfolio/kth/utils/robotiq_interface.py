@@ -1,5 +1,6 @@
 import rospy
-from robotiq_s_model_articulated_msgs.msg import SModelRobotOutput
+import numpy
+from robotiq_s_model_articulated_msgs.msg import SModelRobotOutput, SModelRobotInput
 from sensor_msgs.msg import JointState
 
 
@@ -15,7 +16,7 @@ class RobotiqHandInterface(object):
     FINGER_2_JOINT_NAME = 'finger_2_joint_1'
     FINGER_3_JOINT_NAME = 'finger_middle_joint_1'
 
-    def __init__(self, command_topic, joint_state_topic):
+    def __init__(self, command_topic, state_topic, joint_state_topic):
         """
         Creates a new RobotiqHandInterface. An instance of this class provides
         a convenient interface to control a Robotiq S-model hand.
@@ -23,12 +24,20 @@ class RobotiqHandInterface(object):
         :param joint_state_topic: ROS topic name on which the Robotiq hand publishes its joint state
         """
         self._command_publisher = rospy.Publisher(command_topic, SModelRobotOutput, queue_size=1)
-        self._subscriber = rospy.Subscriber(joint_state_topic, JointState, self._report_robotiq_state)
-        self._last_msg = None
+        self._state_subsciber = rospy.Subscriber(state_topic, SModelRobotInput, self._report_robotiq_state)
+        self._subscriber = rospy.Subscriber(joint_state_topic, JointState, self._report_robotiq_joints)
+        self._last_joint_msg = None
+        self._last_state_msg = None
         self.activate()
+        self._waiting_time_out = 5.0
+        self._sleeping_rate = 0.05
+        self._not_moving_threshold = 0.001
+
+    def _report_robotiq_joints(self, msg):
+        self._last_joint_msg = msg
 
     def _report_robotiq_state(self, msg):
-        self._last_msg = msg
+        self._last_state_msg = msg
 
     def activate(self):
         msg = SModelRobotOutput()
@@ -80,17 +89,34 @@ class RobotiqHandInterface(object):
         Returns the current state (joint positions) of the hand.
         :return: None, if state is unknown, else a dictionary with elements (name, value)
         """
-        if self._last_msg is None:
+        if self._last_joint_msg is None:
             return None
-        indices = [self._last_msg.name.index(self.SCISSOR_JOINT_NAME),
-                   self._last_msg.name.index(self.FINGER_1_JOINT_NAME),
-                   self._last_msg.name.index(self.FINGER_2_JOINT_NAME),
-                   self._last_msg.name.index(self.FINGER_3_JOINT_NAME)]
-        names = [self._last_msg.name[i] for i in indices]
-        values = [self._last_msg.position[i] for i in indices]
+        indices = [self._last_joint_msg.name.index(self.SCISSOR_JOINT_NAME),
+                   self._last_joint_msg.name.index(self.FINGER_1_JOINT_NAME),
+                   self._last_joint_msg.name.index(self.FINGER_2_JOINT_NAME),
+                   self._last_joint_msg.name.index(self.FINGER_3_JOINT_NAME)]
+        names = [self._last_joint_msg.name[i] for i in indices]
+        values = [self._last_joint_msg.position[i] for i in indices]
         return dict(zip(names, values))
 
-    def set_goal_configuration(self, **kwargs):
+    def wait_until_finger_stopped(self):
+        start_time = rospy.Time.now()
+        prev_config = numpy.array(self.get_current_hand_state().values())
+        rospy.sleep(rospy.Duration.from_sec(self._sleeping_rate))
+        current_config = numpy.array(self.get_current_hand_state().values())
+        # while self._last_state_msg.gSTA < 2:
+        diff = numpy.linalg.norm(prev_config - current_config)
+        while diff > self._not_moving_threshold:
+            # rospy.loginfo('Sleeeping, diff: ' + str(diff))
+            rospy.sleep(rospy.Duration.from_sec(self._sleeping_rate))
+            prev_config = current_config
+            current_config = numpy.array(self.get_current_hand_state().values())
+            diff = numpy.linalg.norm(prev_config - current_config)
+            if (rospy.Time.now() - start_time).to_sec() > self._waiting_time_out:
+                rospy.logerr('Waited for hand to stop for %f seconds, aborting.' % self._waiting_time_out)
+                break
+
+    def set_goal_configuration(self, kwargs):
         delta_t = kwargs['delta_t']
         current_configuration = self.get_current_hand_state()
         if 'reduced_dofs' in kwargs:
@@ -127,4 +153,6 @@ class RobotiqHandInterface(object):
                               scissor_vel=velocities[self.SCISSOR_JOINT_NAME], finger_1_vel=velocities[self.FINGER_1_JOINT_NAME],
                               finger_2_vel=velocities[self.FINGER_2_JOINT_NAME], finger_3_vel=velocities[self.FINGER_3_JOINT_NAME],
                               finger_1_force=0.5, finger_2_force=0.5, finger_3_force=0.5, scissor_force=0.5)
+        if 'block' in kwargs and kwargs['block']:
+            self.wait_until_finger_stopped()
 

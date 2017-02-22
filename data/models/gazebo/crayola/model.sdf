@@ -29,7 +29,7 @@
         <pose>0 0 0 0 0 0</pose>
         <geometry>
           <mesh>
-            <uri>model://crayola_64_ct/meshes/crayola_64_ct.dae</uri>
+            <uri>model://crayola_64_ct/meshes/objectModel.stl</uri>
           </mesh>
         </geometry>
         <surface>
@@ -46,6 +46,6 @@
       </collision>
 
     </link>
-    <static>true</static>
+    <static>false</static>
   </model>
 </sdf>

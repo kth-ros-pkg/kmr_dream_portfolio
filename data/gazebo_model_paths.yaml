@@ -1,3 +1,5 @@
 {
-  crayola: $ROS_PACKAGE_PATH(kmr_dream_portfolio)/data/models/gazebo/crayola/model.sdf
+  crayola: $ROS_PACKAGE_PATH(kmr_dream_portfolio)/data/models/gazebo/crayola/model.sdf,
+  ground_plane: /home/joshua/.gazebo/models/ground_plane/model.sdf,
+  table: /home/joshua/.gazebo/models/table/model.sdf
 }

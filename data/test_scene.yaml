@@ -2,9 +2,19 @@ robot: !Robot
     pose: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[0.0, 0.0, 0.0]', frame: world}
     name: kmr_iiwa_robotiq
     configuration: {lbrAxis1: 0.0, lbrAxis2: 0.0, lbrAxis3: 0.0, lbrAxis4: 0.0, lbrAxis5: 0.0, lbrAxis6: 0.0, lbrAxis7: 0.0, scissor_joint: 0.1, finger_2_joint_1: 0.051}
+    grasped_object: None
 objects:
     -   !Object
         name: crayola
         object_class: crayola
-        pose: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[0.0, 0.80, 1.8]', frame: world}
+        pose: !Pose {orientation: !ndarray '[0.02991, 0.02309, 0.0007, 0.99929]', position: !ndarray '[0.34, -0.5467, 1.08]', frame: world}
+    -   !Object
+        name: ground_plane
+        object_class: ground_plane
+        pose: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[0.0, 0.0, 0.0]', frame: world}
+    -   !Object
+        name: table
+        object_class: table
+        pose: !Pose {orientation: !ndarray '[0.0, 0.0, 0.0, 1.0]', position: !ndarray '[-0.05, -0.82, 0.0]', frame: world}
+
 worldFrame: world
