@@ -1,7 +1,7 @@
 from manipulation_dreambed.MethodTypes import ArmPlanner, ArmController, GraspPlanner, GraspController
 from manipulation_dreambed.MethodTypes import GraspResult as ContextGraspResult
 from manipulation_dreambed.Context import Pose as ContextPose
-from manipulation_dreambed.Context import ConfigurationWrapper as ContextConfiguration
+from manipulation_dreambed.ActionPrimitives import GraspReference
 import manipulation_dreambed.DummySimulator as DummySimulator
 from manipulation_dreambed import ROSUtils
 import actionlib
@@ -22,11 +22,16 @@ def send_parameters(parameter_description, param_prefix, parameters, client):
     for (name, description) in parameter_description.iteritems():
         short_name = name.replace(param_prefix + '_', '')
         params_to_send[short_name] = parameters[name]
-    client.update_configuration(params_to_send)
+
+    ROSUtils.guarded_service_call(client.update_configuration,
+                                  params_to_send,
+                                  client.name + '/set_parameters')
 
 
 class SceneBuilderInterface(object):
     def __init__(self, add_object_service_name, remove_object_service_name):
+        self._add_object_service_name = add_object_service_name
+        self._remove_object_service_name = remove_object_service_name
         self._add_object_service = rospy.ServiceProxy(add_object_service_name, AddObject)
         self._remove_object_service = rospy.ServiceProxy(remove_object_service_name, RemoveObject)
 
@@ -35,7 +40,11 @@ class SceneBuilderInterface(object):
         add_object_request.object_identifier = object_info.name
         add_object_request.class_identifier = object_info.object_class
         add_object_request.pose = ROSUtils.toROSPose(object_info.pose, bStamped=True)
-        response = self._add_object_service(add_object_request)
+        response = ROSUtils.guarded_service_call(self._add_object_service,
+                                                 add_object_request,
+                                                 self._add_object_service_name)
+        if response is None:
+            return False
         return response.success
 
     def set_robot_pose(self, robot_info):
@@ -43,15 +52,21 @@ class SceneBuilderInterface(object):
         add_object_request.object_identifier = robot_info.name
         add_object_request.class_identifier = robot_info.name
         add_object_request.pose = ROSUtils.toROSPose(robot_info.pose, bStamped=True)
-        response = self._add_object_service(add_object_request)
+        response = ROSUtils.guarded_service_call(self._add_object_service,
+                                                 add_object_request,
+                                                 self._add_object_service_name)
+        if response is None:
+            return False
         # TODO we should also set the configuration here
         return response.success
 
     def cleanup_scene(self):
         remove_object_request = RemoveObjectRequest()
         remove_object_request.object_identifier = 'all'
-        response = self._remove_object_service(remove_object_request)
-        if not response.success:
+        response = ROSUtils.guarded_service_call(self._remove_object_service,
+                                                 remove_object_request,
+                                                 self._remove_object_service_name)
+        if response is None or not response.success:
             raise RuntimeError('Could not clean-up planning scene!')
 
     def synchronize_scene(self, context):
@@ -120,10 +135,10 @@ class BiRRTMotionPlanner(ArmPlanner):
     def hasResourceConflict(self, activeRoles):
         return False
 
-    def supportsBatchProcessing(self):
+    def supportsBatchProcessing(self, roleSequence):
         return False
 
-    def executeBatch(self, startContext, batchInput, parameters):
+    def executeBatch(self, startContext, batchInput, parameters, getWorldStateFn):
         raise NotImplementedError('[BiRRTMotionPlanner::executeBatch] Batch processing not supported.')
 
     def planArmTrajectory(self, goal, context, paramPrefix, parameters):
@@ -138,8 +153,10 @@ class BiRRTMotionPlanner(ArmPlanner):
         plan_arm_request.target_pose = ROSUtils.toROSPose(goal, bStamped=True)
         plan_arm_request.start_configuration = ROSUtils.toJointState(start_configuration)
         plan_arm_request.grasped_object = context.getRobotInformation().grasped_object
-        response = self._plan_arm_motion_service(plan_arm_request)
-        if response.planning_success:
+        response = ROSUtils.guarded_service_call(self._plan_arm_motion_service,
+                                                 plan_arm_request,
+                                                 self._arm_service_name)
+        if response is not None and response.planning_success:
             return ROSUtils.toContextTrajectory(response.trajectory)
         return None
 
@@ -191,20 +208,22 @@ class HFTSGraspPlanner(GraspPlanner):
     def hasResourceConflict(self, activeRoles):
         return False
 
-    def supportsBatchProcessing(self):
+    def supportsBatchProcessing(self, roleSequence):
         return False
 
-    def executeBatch(self, startContext, batchInput, parameters):
+    def executeBatch(self, startContext, batchInput, parameters, getWorldStateFn):
         raise NotImplementedError('[HFTSGraspPlanner::executeBatch] Batch processing not supported.')
 
-    def planGrasp(self, object, context, paramPrefix, parameters):
+    def planGrasp(self, objectName, context, paramPrefix, parameters):
         send_parameters(self.getParameters('GraspPlanner', paramPrefix),
                         paramPrefix, parameters, self._parameter_client)
-        object_info = context.getSceneInformation().getObjectInfo(object)
+        object_info = context.getSceneInformation().getObjectInfo(objectName)
         plan_grasp_request = PlanGraspRequest()
         plan_grasp_request.object_identifier = object_info.object_class
-        response = self._grasp_planner_service(plan_grasp_request)
-        if response.planning_success:
+        response = ROSUtils.guarded_service_call(self._grasp_planner_service,
+                                                 plan_grasp_request,
+                                                 self._service_name)
+        if response is not None and response.planning_success:
             pose = ROSUtils.toContextPose(response.grasp_pose)
             configuration = ROSUtils.toContextConfiguration(response.hand_configuration)
             # TODO approach direction?
@@ -237,6 +256,7 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
         self._integrated_hfts_service = None
         self._plan_arm_motion_service = None
         self._scene_interface = None
+        self._last_integrated_solution = None
         if use_dummy_control:
             self._dummy_controller = DummySimulator.getControllerInstance()
         else:
@@ -309,20 +329,51 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
     def hasResourceConflict(self, activeRoles):
         return False
 
-    def supportsBatchProcessing(self):
-        # TODO return True
-        return False
+    def supportsBatchProcessing(self, roleSequence):
+        return len(roleSequence) == 3 and roleSequence[0] == 'GraspPlanner' \
+            and roleSequence[1] == 'ArmPlanner' and roleSequence[2] == 'ArmController'
 
-    def executeBatch(self, startContext, batchInput, parameters):
-        # TODO
-        raise NotImplementedError('IMPLEMENT ME')
+    def executeBatch(self, context, batchInput, parameters, getWorldStateFn):
+        # We can be sure that the batch consists of [GraspPlanner, ArmPlanner, ArmController, GraspController]
+        assert len(batchInput) == 3 and batchInput[0][0] == 'GraspPlanner' and batchInput[1][0] == 'ArmPlanner' \
+            and batchInput[2][0] == 'ArmController'
+        grasp_planner_input = batchInput[0][1]
+        grasp_planner_param_prefix = grasp_planner_input['paramPrefix']
+        arm_planner_input = batchInput[1][1]
+        arm_planner_param_prefix = arm_planner_input['paramPrefix']
+        # Send parameters for grasp and arm motion planning (TODO this would be a bit problematic if they intersected)
+        send_parameters(self.getParameters('GraspPlanner', grasp_planner_param_prefix),
+                        grasp_planner_param_prefix, parameters, self._parameter_client)
+        send_parameters(self.getParameters('ArmPlanner', arm_planner_param_prefix),
+                        arm_planner_param_prefix, parameters, self._parameter_client)
+        self._scene_interface.synchronize_scene(context)
+        trajectory, pose = self._call_hfts_planner(grasp_planner_input['objectName'],
+                                                   context)
+        if trajectory is None or pose is None:
+            return 3 * [(False, None)]
+        results = []
+        grasp_result = self._make_grasp_result(trajectory, pose)
+        results.append((True, grasp_result))
+        context_traj = ROSUtils.toContextTrajectory(trajectory)
+        results.append((True, context_traj))
+        # TODO if we had parameters for the controllers, we would need to set these here
+        if self._dummy_controller is None:
+            control_success = self._synched_hand_arm_controller.execute_trajectory(trajectory)
+        else:
+            control_success = self._dummy_controller.executeArmTrajectory(context_traj, context,
+                                                                          None, parameters)
+            # control_success = self._dummy_controller.startGraspExecution(grasp_result, context,
+            #                                                              None, parameters)
+        results.append((control_success, control_success))
+        # results.append(control_success, control_success)
+        return results
 
-    def planGrasp(self, object, context, paramPrefix, parameters):
+    def planGrasp(self, objectName, context, paramPrefix, parameters):
         # If this function is called, it means we are only asked to plan a grasp
         send_parameters(self.getParameters('GraspPlanner', paramPrefix),
                         paramPrefix, parameters, self._parameter_client)
         self._scene_interface.synchronize_scene(context)
-        trajectory, pose = self._call_hfts_planner(object, context, paramPrefix, parameters)
+        trajectory, pose = self._call_hfts_planner(objectName, context)
         return self._make_grasp_result(trajectory, pose)
 
     def planArmTrajectory(self, goal, context, paramPrefix, parameters):
@@ -337,8 +388,10 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
         plan_arm_request.target_pose = ROSUtils.toROSPose(goal, bStamped=True)
         plan_arm_request.start_configuration = ROSUtils.toJointState(start_configuration)
         plan_arm_request.grasped_object = context.getRobotInformation().grasped_object
-        response = self._plan_arm_motion_service(plan_arm_request)
-        if response.planning_success:
+        response = ROSUtils.guarded_service_call(self._plan_arm_motion_service,
+                                                 plan_arm_request,
+                                                 self._arm_service_name)
+        if response is not None and response.planning_success:
             return ROSUtils.toContextTrajectory(response.trajectory)
         return None
 
@@ -377,7 +430,7 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
             return self._dummy_controller.stopGraspExecution()
         return True
 
-    def _call_hfts_planner(self, object_name, context, paramPrefix, parameters):
+    def _call_hfts_planner(self, object_name, context):
         # TODO set parameters
         object_info = context.getSceneInformation().getObjectInfo(object_name)
         hfts_planner_request = PlanGraspMotionRequest()
@@ -386,8 +439,10 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
         hfts_planner_request.object_pose = ROSUtils.toROSPose(object_info.pose, bStamped=True)
         start_config = context.getRobotInformation().configuration
         hfts_planner_request.start_configuration = ROSUtils.toJointState(start_config)
-        response = self._integrated_hfts_service(hfts_planner_request)
-        if not response.planning_success:
+        response = ROSUtils.guarded_service_call(self._integrated_hfts_service,
+                                                 hfts_planner_request,
+                                                 self._integrated_hfts_service_name)
+        if response is None or not response.planning_success:
             return None, None
         return response.trajectory, response.grasp_pose
 
@@ -454,6 +509,8 @@ class SynchedHandArmController(object):
                                       done_cb=self._receive_arm_traj_finish_signal)
         self._fake_feedback_timer = rospy.Timer(rospy.Duration.from_sec(0.05),
                                                 self._simulate_feedback, oneshot=False)
+        # TODO return whether we grasped an object
+        return True
 
     def execute_arm_trajectory(self, traj, block=False):
         if self._execution_running:

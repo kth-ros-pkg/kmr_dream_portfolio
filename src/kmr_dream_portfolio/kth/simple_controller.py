@@ -42,10 +42,10 @@ class SimpleArmController(ArmController):
     def hasResourceConflict(self, activeRoles):
         return False
 
-    def supportsBatchProcessing(self):
+    def supportsBatchProcessing(self, roleSequence):
         return False
 
-    def executeBatch(self, startContext, batchInput, parameters):
+    def executeBatch(self, startContext, batchInput, parameters, getWorldStateFn):
         raise NotImplementedError('[SimpleArmController::executeBatch] Not supported.')
 
     def executeArmTrajectory(self, trajectory, context, paramPrefix, parameters):
@@ -99,10 +99,10 @@ class SimpleGraspController(GraspController):
         # return GraspController in activeRoles
         return False
 
-    def supportsBatchProcessing(self):
+    def supportsBatchProcessing(self, roleSequence):
         return False
 
-    def executeBatch(self, startContext, batchInput, parameters):
+    def executeBatch(self, startContext, batchInput, parameters, getWorldStateFn):
         raise NotImplementedError('[SimpleGraspController::executeBatch] Not supported.')
 
     def startGraspExecution(self, grasp, context, paramPrefix, parameters):
