@@ -1,0 +1,7 @@
+#### First trial with conditional parameters not working
+Best score is  4.19177350203
+Best parameters are  {'moveToGrasp_planner': 'IntegratedHFTSPlanner', 'grasp1_planner_connected_space_weight': '0.20690973524349343', 'grasp1_planner_time_limit': '72.41477164701682', 'moveToGrasp_controller': 'IntegratedHFTSPlanner', 'grasp1_planner_use_approximates': '1', 'grasp1_planner': 'IntegratedHFTSPlanner', 'grasp1_planner_max_iterations': '8', 'grasp1_planner_max_num_hierarchy_descends': '3', 'grasp1_planner_free_space_weight': '1.4554279331494486', 'grasp1_controller': 'DummyController', 'grasp1_planner_num_planning_attempts': '175', 'grasp1_planner_min_iterations': '185', 'grasp1_planner_num_hfts_iterations': '195'}
+
+#### Second trial 
+Best score is  4.14407507579
+Best parameters are  {'moveToGrasp_planner': 'IntegratedHFTSPlanner', 'grasp1_planner_connected_space_weight': '9.474122579471832', 'grasp1_planner_time_limit': '86.6050995550913', 'moveToGrasp_controller': 'IntegratedHFTSPlanner', 'grasp1_planner_use_approximates': '0', 'grasp1_planner': 'IntegratedHFTSPlanner', 'grasp1_planner_max_iterations': '154', 'grasp1_planner_max_num_hierarchy_descends': '2', 'grasp1_planner_free_space_weight': '4.547878812660045', 'grasp1_controller': 'DummyController', 'grasp1_planner_num_planning_attempts': '91', 'grasp1_planner_min_iterations': '146', 'grasp1_planner_num_hfts_iterations': '179'}

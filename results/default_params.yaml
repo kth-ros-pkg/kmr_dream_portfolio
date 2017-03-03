@@ -1,0 +1,1 @@
+- {'moveToGrasp_planner': 'IntegratedHFTSPlanner', 'moveToGrasp_controller': 'DummyController', 'grasp1_planner': 'HFTSGraspPlanner', 'grasp1_planner_num_planning_attempts': '10', 'grasp1_planner_num_hfts_iterations': 40, 'grasp1_controller': 'DummyController'}

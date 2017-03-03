@@ -270,10 +270,10 @@ class IntegratedHFTSPlanner(GraspPlanner, GraspController, ArmPlanner, ArmContro
             raise ValueError('[IntegratedHFTSPlanner::getParameters] Parameters for non implemented role requested: ' + str(role))
         if role == 'GraspPlanner':
             return {paramPrefix + '_min_iterations': ('integer', [1, 200], 10),
-                    paramPrefix + '_max_iterations': ('integer', [1, 200], 10),
+                    paramPrefix + '_max_iterations': ('integer', [1, 200], 15),
                     paramPrefix + '_free_space_weight': ('real', [0.0, 10.0], 0.5),
                     paramPrefix + '_connected_space_weight': ('real', [0.0, 10.0], 4.0),
-                    paramPrefix + '_max_num_hierarchy_descends': ('integer', [0, 20], 0),
+                    paramPrefix + '_max_num_hierarchy_descends': ('integer', [0, 10], 0),
                     paramPrefix + '_time_limit': ('real', [0.0, 120.0], 60.0),
                     paramPrefix + '_use_approximates': ('integer', [0, 1], 1)}
         if role == 'ArmPlanner':
